@@ -5,7 +5,7 @@ use ring::aead;
 pub use rustls::Error;
 use rustls::{
     self,
-    quic::{Connection, HeaderProtectionKey, InitialSuite, KeyChange, PacketKey, Secrets, Version},
+    quic::{Connection, HeaderProtectionKey, KeyChange, PacketKey, Secrets, Suite, Version},
 };
 use rustls_pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 
@@ -30,7 +30,7 @@ pub struct TlsSession {
     got_handshake_data: bool,
     next_secrets: Option<Secrets>,
     inner: Connection,
-    suite: InitialSuite,
+    suite: Suite,
 }
 
 impl TlsSession {
@@ -44,7 +44,7 @@ impl TlsSession {
 
 impl crypto::Session for TlsSession {
     fn initial_keys(&self, dst_cid: &ConnectionId, side: Side) -> Keys {
-        initial_keys(self.version, dst_cid, side, self.suite)
+        initial_keys(self.version, dst_cid, side, &self.suite)
     }
 
     fn handshake_data(&self) -> Option<Box<dyn Any>> {
@@ -254,7 +254,7 @@ impl crypto::ClientConfig for rustls::ClientConfig {
         params: &TransportParameters,
     ) -> Result<Box<dyn crypto::Session>, ConnectError> {
         let version = interpret_version(version)?;
-        let suite = InitialSuite::from_provider((*self).as_ref()).unwrap();
+        let suite = suite_from_provider(self.crypto_provider()).unwrap();
         Ok(Box::new(TlsSession {
             version,
             got_handshake_data: false,
@@ -282,7 +282,7 @@ impl crypto::ServerConfig for rustls::ServerConfig {
         params: &TransportParameters,
     ) -> Box<dyn crypto::Session> {
         let version = interpret_version(version).unwrap();
-        let suite = InitialSuite::from_provider((*self).as_ref()).unwrap();
+        let suite = suite_from_provider(self.crypto_provider()).unwrap();
         Box::new(TlsSession {
             version,
             got_handshake_data: false,
@@ -297,8 +297,8 @@ impl crypto::ServerConfig for rustls::ServerConfig {
     fn initial_keys(&self, version: u32, dst_cid: &ConnectionId) -> Result<Keys, CryptoError> {
         let version = interpret_version(version)?;
         // We validate that this works on configuration, so we can `unwrap()` here.
-        let suite = InitialSuite::from_provider((*self).as_ref()).unwrap();
-        Ok(initial_keys(version, dst_cid, Side::Server, suite))
+        let suite = suite_from_provider(self.crypto_provider()).unwrap();
+        Ok(initial_keys(version, dst_cid, Side::Server, &suite))
     }
 
     fn retry_tag(&self, version: u32, orig_dst_cid: &ConnectionId, packet: &[u8]) -> [u8; 16] {
@@ -326,6 +326,19 @@ impl crypto::ServerConfig for rustls::ServerConfig {
     }
 }
 
+pub(crate) fn suite_from_provider(provider: &Arc<rustls::crypto::CryptoProvider>) -> Option<Suite> {
+    provider
+        .cipher_suites
+        .iter()
+        .find_map(|cs| match (cs.suite(), cs.tls13()) {
+            (rustls::CipherSuite::TLS13_AES_128_GCM_SHA256, Some(suite)) => {
+                Some(suite.quic_suite())
+            }
+            _ => None,
+        })
+        .flatten()
+}
+
 fn to_vec(params: &TransportParameters) -> Vec<u8> {
     let mut bytes = Vec::new();
     params.write(&mut bytes);
@@ -336,7 +349,7 @@ pub(crate) fn initial_keys(
     version: Version,
     dst_cid: &ConnectionId,
     side: Side,
-    suite: InitialSuite,
+    suite: &Suite,
 ) -> Keys {
     let keys = suite.keys(dst_cid, side.into(), version);
     Keys {
