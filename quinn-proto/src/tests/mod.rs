@@ -376,12 +376,19 @@ fn reject_self_signed_server_cert() {
 fn reject_missing_client_cert() {
     let _guard = subscribe();
 
+    let mut store = RootCertStore::empty();
+    // `WebPkiClientVerifier` requires a nonempty store, so we stick our own certificate into it
+    // because it's convenient.
+    store
+        .add(CERTIFICATE.serialize_der().unwrap().into())
+        .unwrap();
+
     let key = PrivatePkcs8KeyDer::from(CERTIFICATE.serialize_private_key_der());
     let cert = CertificateDer::from(util::CERTIFICATE.serialize_der().unwrap());
 
     let config = rustls::ServerConfig::builder()
         .with_client_cert_verifier(
-            WebPkiClientVerifier::builder(Arc::new(RootCertStore::empty()))
+            WebPkiClientVerifier::builder(Arc::new(store))
                 .build()
                 .unwrap(),
         )
