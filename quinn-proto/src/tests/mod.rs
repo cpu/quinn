@@ -386,9 +386,12 @@ fn reject_missing_client_cert() {
     let key = PrivatePkcs8KeyDer::from(CERTIFICATE.serialize_private_key_der());
     let cert = CertificateDer::from(util::CERTIFICATE.serialize_der().unwrap());
 
-    let config = rustls::ServerConfig::builder()
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let config = rustls::ServerConfig::builder_with_provider(provider.clone())
+        .with_safe_default_protocol_versions()
+        .unwrap()
         .with_client_cert_verifier(
-            WebPkiClientVerifier::builder(Arc::new(store))
+            WebPkiClientVerifier::builder_with_provider(Arc::new(store), provider)
                 .build()
                 .unwrap(),
         )

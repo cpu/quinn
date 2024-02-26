@@ -2,7 +2,6 @@
 //! Commonly used code in most examples.
 
 use quinn::{ClientConfig, Endpoint, ServerConfig};
-use rustls_pki_types;
 
 use std::{error::Error, net::SocketAddr, sync::Arc};
 
